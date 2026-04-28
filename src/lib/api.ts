@@ -1,6 +1,17 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 
+const DEFAULT_SINGLE_USER_ID = "00000000-0000-0000-0000-000000000001";
+
+function normalizeUserId(raw?: string) {
+  if (!raw) return DEFAULT_SINGLE_USER_ID;
+  const isUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      raw,
+    );
+  return isUuid ? raw : DEFAULT_SINGLE_USER_ID;
+}
+
 export async function requireUser() {
   let supabase;
   try {
@@ -15,7 +26,7 @@ export async function requireUser() {
   }
   return {
     supabase,
-    user: { id: process.env.SINGLE_USER_ID ?? "single-user-local" },
+    user: { id: normalizeUserId(process.env.SINGLE_USER_ID) },
   };
 }
 
