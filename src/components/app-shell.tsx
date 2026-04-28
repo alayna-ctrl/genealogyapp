@@ -1,0 +1,17 @@
+import Link from "next/link";
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] text-slate-900">
+      <nav className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl items-center gap-6 px-6 py-3 text-sm">
+          <Link href="/dashboard" className="font-semibold text-[#1F3864]">Genealogy Cleanup</Link>
+          <Link href="/dashboard">Dashboard</Link>
+          <Link href="/people">People</Link>
+          <Link href="/people/new">Add Person</Link>
+        </div>
+      </nav>
+      <main className="mx-auto max-w-7xl p-6">{children}</main>
+    </div>
+  );
+}
