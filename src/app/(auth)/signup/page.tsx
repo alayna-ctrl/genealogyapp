@@ -1,6 +1,5 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -16,10 +15,18 @@ export default function SignupPage() {
     setError("");
     setMessage("");
     if (password !== confirmPassword) return setError("Passwords do not match.");
-    const supabase = createClient();
-    const { error: authError } = await supabase.auth.signUp({ email, password });
-    if (authError) return setError(authError.message);
-    setMessage("Check your email to confirm your account.");
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) return setError(data.error || "Signup failed");
+      setMessage("Check your email to confirm your account.");
+    } catch {
+      setError("Network error while creating account.");
+    }
   }
 
   return (
