@@ -1,13 +1,22 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 
 export async function requireUser() {
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  let supabase;
+  try {
+    supabase = createAdminClient();
+  } catch (error) {
+    return {
+      error: NextResponse.json(
+        { error: (error as Error).message },
+        { status: 500 },
+      ),
+    };
   }
-  return { supabase, user: data.user };
+  return {
+    supabase,
+    user: { id: process.env.SINGLE_USER_ID ?? "single-user-local" },
+  };
 }
 
 export function buildCleanupNote(payload: {
