@@ -1,8 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { headers } from "next/headers";
 
 export async function createClient() {
-  const cookieStore = await cookies();
+  const headerStore = await headers();
+  const cookieHeader = headerStore.get("cookie") ?? "";
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,12 +11,17 @@ export async function createClient() {
     {
       cookies: {
         getAll() {
-          return cookieStore.getAll();
+          return cookieHeader
+            .split(";")
+            .map((chunk) => chunk.trim())
+            .filter(Boolean)
+            .map((chunk) => {
+              const [name, ...rest] = chunk.split("=");
+              return { name, value: rest.join("=") };
+            });
         },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
+        setAll() {
+          // Server components read auth state only; cookie writes are handled in middleware.
         },
       },
     },

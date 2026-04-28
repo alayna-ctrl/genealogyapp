@@ -1,6 +1,18 @@
+"use client";
+
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  async function signOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  }
+
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-slate-900">
       <nav className="border-b border-slate-200 bg-white">
@@ -9,6 +21,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link href="/dashboard">Dashboard</Link>
           <Link href="/people">People</Link>
           <Link href="/people/new">Add Person</Link>
+          <button className="ml-auto rounded border px-2 py-1" onClick={signOut}>Sign out</button>
         </div>
       </nav>
       <main className="mx-auto max-w-7xl p-6">{children}</main>
