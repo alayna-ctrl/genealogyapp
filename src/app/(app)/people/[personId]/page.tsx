@@ -7,6 +7,7 @@ import { QualityTierBadge } from "@/components/QualityTierBadge";
 import { RedFlagPanel } from "@/components/RedFlagPanel";
 import { StepProgressBar } from "@/components/StepProgressBar";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 const STEPS = ["Snapshot", "Source Review", "Relationship Check", "Hints + Searches", "Evidence Summary", "Update Ancestry", "Next Steps"];
 
@@ -28,6 +29,7 @@ function detectTier(sourceTitle: string) {
 }
 
 export default function PersonWorkflowPage({ params }: { params: Promise<{ personId: string }> }) {
+  const router = useRouter();
   const [personId, setPersonId] = useState("");
   const [bundle, setBundle] = useState<any>(null);
   const [step, setStep] = useState(1);
@@ -179,6 +181,18 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
       (r.status === "Needs Proof" || r.status === "Probably Wrong"),
   );
 
+  async function deleteCurrentPerson() {
+    const ok = window.confirm(`Delete ${person.full_name}? This will remove all related data for this person.`);
+    if (!ok) return;
+    const res = await fetch(`/api/people/${personId}`, { method: "DELETE" });
+    if (res.ok) {
+      router.push("/people");
+      router.refresh();
+    } else {
+      window.alert("Could not delete person. Please try again.");
+    }
+  }
+
   return (
     <AppShell>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[16rem_1fr_18rem]">
@@ -197,11 +211,19 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
         </aside>
 
         <section className="space-y-4 rounded border bg-white p-4">
-          <h1 className="text-xl font-semibold text-[#1F3864]">Step {step}: {STEPS[step - 1]}</h1>
+          <div className="flex items-center justify-between gap-2">
+            <h1 className="text-xl font-semibold text-[#1F3864]">Step {step}: {STEPS[step - 1]}</h1>
+            <button className="rounded border border-red-300 px-3 py-2 text-sm text-red-700" onClick={deleteCurrentPerson}>Delete Person</button>
+          </div>
           {successMessage ? <div className="rounded bg-green-100 p-2 text-sm text-green-900">{successMessage}</div> : null}
 
           {step === 1 && (
             <div className="space-y-3">
+              <label className="text-sm">
+                Full Name
+                <input className="mt-1 w-full rounded border p-2" defaultValue={person.full_name ?? ""} onBlur={(e) => savePersonField("full_name", e.currentTarget.value)} />
+                {savedField === "full_name" ? <span className="text-xs text-green-700">Saved ✓</span> : null}
+              </label>
               <label className="text-sm">
                 Main Research Question
                 <textarea

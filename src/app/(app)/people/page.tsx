@@ -20,6 +20,17 @@ export default function PeoplePage() {
 
   useEffect(() => { fetch("/api/people").then((res) => res.json()).then(setPeople); }, []);
 
+  async function deletePerson(personId: string, fullName: string) {
+    const ok = window.confirm(`Delete ${fullName}? This will remove related sources, relationships, and notes.`);
+    if (!ok) return;
+    const res = await fetch(`/api/people/${personId}`, { method: "DELETE" });
+    if (res.ok) {
+      setPeople((prev) => prev.filter((p) => p.person_id !== personId));
+    } else {
+      window.alert("Could not delete person. Please try again.");
+    }
+  }
+
   const filtered = useMemo(() => people.filter((p) => {
     if (status && p.status !== status) return false;
     if (generation && Number(generation) !== p.generation_number) return false;
@@ -28,5 +39,5 @@ export default function PeoplePage() {
     return true;
   }), [people, status, generation, directLineOnly, staleOnly]);
 
-  return <AppShell><div className="space-y-4"><div className="flex items-center justify-between"><h1 className="text-2xl font-semibold text-[#1F3864]">People</h1><Link href="/people/new" className="rounded bg-[#2F75B6] px-3 py-2 text-white">Add Person</Link></div><div className="grid gap-2 rounded border bg-white p-3 md:grid-cols-4"><select className="rounded border p-2" value={status} onChange={(e)=>setStatus(e.target.value)}><option value="">All statuses</option><option>Verified</option><option>Likely</option><option>Needs Proof</option><option>Conflict</option><option>Probably Wrong</option><option>Done for Now</option></select><input className="rounded border p-2" placeholder="Generation" value={generation} onChange={(e)=>setGeneration(e.target.value)} /><label className="flex items-center gap-2 rounded border p-2"><input type="checkbox" checked={directLineOnly} onChange={(e)=>setDirectLineOnly(e.target.checked)} />Direct line</label><label className="flex items-center gap-2 rounded border p-2"><input type="checkbox" checked={staleOnly} onChange={(e)=>setStaleOnly(e.target.checked)} />Stale only</label></div>{filtered.length===0?<div className="rounded border bg-white p-6 text-slate-600">No people yet - add your first person.</div>:<div className="grid gap-3 md:grid-cols-2">{filtered.map((person)=><PersonCard key={person.id} person={person} />)}</div>}</div></AppShell>;
+  return <AppShell><div className="space-y-4"><div className="flex items-center justify-between"><h1 className="text-2xl font-semibold text-[#1F3864]">People</h1><Link href="/people/new" className="rounded bg-[#2F75B6] px-3 py-2 text-white">Add Person</Link></div><div className="grid gap-2 rounded border bg-white p-3 md:grid-cols-4"><select className="rounded border p-2" value={status} onChange={(e)=>setStatus(e.target.value)}><option value="">All statuses</option><option>Verified</option><option>Likely</option><option>Needs Proof</option><option>Conflict</option><option>Probably Wrong</option><option>Done for Now</option></select><input className="rounded border p-2" placeholder="Generation" value={generation} onChange={(e)=>setGeneration(e.target.value)} /><label className="flex items-center gap-2 rounded border p-2"><input type="checkbox" checked={directLineOnly} onChange={(e)=>setDirectLineOnly(e.target.checked)} />Direct line</label><label className="flex items-center gap-2 rounded border p-2"><input type="checkbox" checked={staleOnly} onChange={(e)=>setStaleOnly(e.target.checked)} />Stale only</label></div>{filtered.length===0?<div className="rounded border bg-white p-6 text-slate-600">No people yet - add your first person.</div>:<div className="grid gap-3 md:grid-cols-2">{filtered.map((person)=><div key={person.id} className="space-y-2"><PersonCard person={person} /><div className="flex gap-2"><Link href={`/people/${person.person_id}`} className="rounded border px-3 py-1 text-sm">Edit</Link><button className="rounded border border-red-300 px-3 py-1 text-sm text-red-700" onClick={()=>deletePerson(person.person_id, person.full_name)}>Delete</button></div></div>)}</div>}</div></AppShell>;
 }
