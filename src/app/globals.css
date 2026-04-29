@@ -10,3 +10,65 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
+
+@layer components {
+  .ui-card {
+    @apply rounded-xl border border-slate-200 bg-white/80 p-3;
+  }
+
+  .ui-card-soft {
+    @apply rounded-xl border p-3;
+  }
+
+  .ui-card-indigo {
+    @apply ui-card-soft border-indigo-100 bg-indigo-50/50;
+  }
+
+  .ui-card-violet {
+    @apply ui-card-soft border-violet-100 bg-violet-50/40;
+  }
+
+  .ui-card-cyan {
+    @apply ui-card-soft border-cyan-100 bg-cyan-50/40;
+  }
+
+  .ui-card-rose {
+    @apply ui-card-soft border-rose-100 bg-rose-50/30;
+  }
+
+  .ui-btn {
+    @apply rounded px-3 py-2 text-sm transition-colors;
+  }
+
+  .ui-btn-soft {
+    @apply ui-btn border border-slate-300 bg-white/70 text-slate-800 hover:bg-white;
+  }
+
+  .ui-btn-primary {
+    @apply ui-btn bg-indigo-300 text-indigo-950 hover:bg-indigo-200;
+  }
+
+  .ui-btn-success {
+    @apply ui-btn bg-emerald-300 text-emerald-950 hover:bg-emerald-200;
+  }
+
+  .ui-chip {
+    @apply rounded px-2 py-1 text-xs;
+  }
+
+  .ui-chip-soft {
+    @apply ui-chip bg-slate-100 text-slate-700;
+  }
+
+  .ui-input {
+    @apply w-full rounded border border-slate-300 bg-white/80 p-2;
+  }
+
+  .ui-alert-success {
+    @apply rounded border border-emerald-200 bg-emerald-50 p-2 text-sm text-emerald-900;
+  }
+
+  .ui-alert-error {
+    @apply rounded border border-red-200 bg-red-50 p-2 text-sm text-red-900;
+  }
+}
