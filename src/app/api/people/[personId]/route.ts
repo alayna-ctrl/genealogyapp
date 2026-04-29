@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/api";
+import { buildPersonAudit } from "@/lib/genealogy-audit";
 import { NextResponse } from "next/server";
 
 export async function GET(_: Request, { params }: { params: Promise<{ personId: string }> }) {
@@ -18,6 +19,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ personId: 
     supabase.from("next_steps").select("*").eq("user_id", user.id).eq("person_id", personId),
   ]);
 
+  const audit = buildPersonAudit({
+    person: personRes.data,
+    sources: sources.data ?? [],
+    relationships: relationships.data ?? [],
+    hints: hints.data ?? [],
+  });
+
   return NextResponse.json({
     person: personRes.data,
     sources: sources.data ?? [],
@@ -25,6 +33,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ personId: 
     hints: hints.data ?? [],
     evidence: evidence.data ?? [],
     next_steps: nextSteps.data ?? [],
+    audit,
   });
 }
 

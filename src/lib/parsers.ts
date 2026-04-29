@@ -2,6 +2,7 @@ type ParseRecordResult = {
   fields: Record<string, string>;
   household: string[];
   recordType: string;
+  confidence: "low" | "medium" | "high";
   says: string;
   proves: string;
   notProves: string;
@@ -64,43 +65,36 @@ export function parseProfileText(text: string) {
     .filter(Boolean);
   const lower = lines.map((l) => l.toLowerCase());
 
+  function sectionAfter(headerPattern: RegExp, max = 20) {
+    const idx = lower.findIndex((l) => headerPattern.test(l));
+    if (idx < 0) return [];
+    return lines.slice(idx + 1, idx + 1 + max);
+  }
+
   const name = lines.find((line) => isLikelyName(line)) ?? "";
+  const vitals = lines.filter((line) => /^(birth|death)\s+/i.test(line) && /•/.test(line));
+  const birth = vitals.find((line) => /^birth\s+/i.test(line))?.replace(/^birth\s+/i, "") ?? "";
+  const death = vitals.find((line) => /^death\s+/i.test(line))?.replace(/^death\s+/i, "") ?? "";
 
-  const birth = lines.find((line) => /^birth\s+/i.test(line) && /•/.test(line))?.replace(/^birth\s+/i, "") ?? "";
-  const death = lines.find((line) => /^death\s+/i.test(line) && /•/.test(line))?.replace(/^death\s+/i, "") ?? "";
+  const marriageSection = sectionAfter(/age\s+\d+.*marriage/i, 8);
+  const marriageDate =
+    marriageSection.find((l) => /\d{1,2}\s+[A-Z]{3}\s+\d{4}|\b\d{4}\b/i.test(l) && /•/.test(l)) ?? "";
+  const spouse = marriageSection.find((l) => isLikelyName(l)) ?? "";
 
-  let spouse = "";
-  let marriageDate = "";
-  const marriageIdx = lower.findIndex((l) => /age\s+\d+.*marriage/i.test(l));
-  if (marriageIdx >= 0) {
-    const after = lines.slice(marriageIdx + 1, marriageIdx + 6);
-    marriageDate = after.find((l) => /\d{1,2}\s+[A-Z]{3}\s+\d{4}|\d{4}/i.test(l) && /•/.test(l)) ?? "";
-    spouse = after.find((l) => isLikelyName(l)) ?? "";
-  }
+  const parentsSection = sectionAfter(/^parents$|parents\s*$/i, 8);
+  const parentCandidates = parentsSection.filter((line) => {
+    if (/^https?:\/\//i.test(line)) return false;
+    if (/\d{4}|•/.test(line)) return false;
+    return isLikelyName(line);
+  });
+  const father = parentCandidates[0] ?? "";
+  const mother = parentCandidates[1] ?? "";
 
-  let father = "";
-  let mother = "";
-  const parentsIdx = lower.findIndex((l) => /^parents$/i.test(l) || /parents\s*$/i.test(l));
-  if (parentsIdx >= 0) {
-    const candidates = lines.slice(parentsIdx + 1).filter((line) => {
-      if (/^https?:\/\//i.test(line)) return false;
-      if (/\d{4}|•/.test(line)) return false;
-      if (!isLikelyName(line)) return false;
-      return true;
-    });
-    father = candidates[0] ?? "";
-    mother = candidates[1] ?? "";
-  }
-
-  const children: string[] = [];
-  const scIdx = lower.findIndex((l) => /spouse and children/i.test(l));
-  if (scIdx >= 0) {
-    const block = lines.slice(scIdx + 1, scIdx + 20).filter((line) => !/^https?:\/\//i.test(line));
-    const nameLines = block.filter((line) => isLikelyName(line) && !/\d{4}\s*[–\-]\s*\d{4}|\d{4}\s*[–\-]/.test(line));
-    if (nameLines.length > 1) {
-      children.push(...nameLines.slice(1));
-    }
-  }
+  const childrenSection = sectionAfter(/spouse and children/i, 20).filter((line) => !/^https?:\/\//i.test(line));
+  const children = childrenSection.filter(
+    (line) => isLikelyName(line) && !/\d{4}\s*[–\-]\s*\d{4}|\d{4}\s*[–\-]/.test(line),
+  );
+  const normalizedChildren = children.length > 1 ? children.slice(1) : [];
 
   const keySources = lines.filter((line) => KEY_SOURCE_PATTERN.test(line)).map(normalizeSourceTitle);
   const batchSources = lines.filter((line) => BATCH_SOURCE_PATTERN.test(line)).map(normalizeSourceTitle);
@@ -114,7 +108,7 @@ export function parseProfileText(text: string) {
     father,
     mother,
     parentsFormatted: [father, mother].filter(Boolean).join(" and "),
-    children,
+    children: normalizedChildren,
     keySources,
     batchSources,
   };
@@ -254,5 +248,8 @@ export function parseRecordText(text: string): ParseRecordResult {
     notProves = `Parent names (${father || "unknown"} and ${mother || "unknown"}) were reported by ${informant || "the informant"} who may not have known the grandparents' details. Verify with birth record.`;
   }
 
-  return { fields, household, recordType, says, proves, notProves };
+  const confidence: "low" | "medium" | "high" =
+    Object.keys(fields).length > 8 ? "high" : Object.keys(fields).length > 3 ? "medium" : "low";
+
+  return { fields, household, recordType, confidence, says, proves, notProves };
 }

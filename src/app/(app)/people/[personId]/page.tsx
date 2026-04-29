@@ -7,7 +7,8 @@ import { QualityTierBadge } from "@/components/QualityTierBadge";
 import { RedFlagPanel } from "@/components/RedFlagPanel";
 import { StepProgressBar } from "@/components/StepProgressBar";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { detectTier, inferSourceSite } from "@/lib/source-utils";
 
 const STEPS = ["Snapshot", "Source Review", "Relationship Check", "Hints + Searches", "Evidence Summary", "Update Ancestry", "Next Steps"];
 
@@ -18,24 +19,16 @@ const RELATIONSHIP_SUGGESTIONS: Record<string, string> = {
   Mother: "birth/baptism record naming mother, census as child in mother's household, marriage record naming bride's parents",
 };
 
-function detectTier(sourceTitle: string) {
-  const t = sourceTitle.toLowerCase();
-  if (/family tree|member tree|geni|familysearch tree/.test(t)) return "Family Tree / Other";
-  if (/find a grave/.test(t)) return "Find A Grave";
-  if (/index/.test(t)) return "Derivative Record";
-  if (/obituary|newspaper|family history/.test(t)) return "Authored Work";
-  if (/census|death cert|birth cert|marriage|passenger|military|naturalization|church|probate|will/.test(t)) return "Original Record";
-  return "Unknown";
-}
-
 export default function PersonWorkflowPage({ params }: { params: Promise<{ personId: string }> }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [personId, setPersonId] = useState("");
   const [bundle, setBundle] = useState<any>(null);
   const [step, setStep] = useState(1);
   const [profileText, setProfileText] = useState("");
   const [recordText, setRecordText] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
+  const [requirements, setRequirements] = useState<any[]>([]);
   const [savedField, setSavedField] = useState<string | null>(null);
   const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
   const [showNegativeForm, setShowNegativeForm] = useState(false);
@@ -44,6 +37,9 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
   const [connectingChildSelection, setConnectingChildSelection] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [advancing, setAdvancing] = useState(false);
+  const [savingSource, setSavingSource] = useState(false);
+  const [quickSourceText, setQuickSourceText] = useState("");
+  const [toast, setToast] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const missingRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { params.then((p) => setPersonId(p.personId)); }, [params]);
@@ -53,6 +49,15 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
   async function fetchData() {
     const data = await fetch(`/api/people/${personId}`).then((r) => r.json());
     setBundle(data);
+    const action = searchParams.get("action");
+    if (action === "add-source") {
+      setStep(2);
+      return;
+    }
+    if (action === "log-search") {
+      setStep(4);
+      return;
+    }
     setStep(data.person.current_step);
   }
 
@@ -63,6 +68,8 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
       body: JSON.stringify({ [field]: value }),
     });
     setSavedField(field);
+    setToast({ kind: "success", text: "Saved." });
+    setTimeout(() => setToast(null), 2000);
     setTimeout(() => setSavedField((prev) => (prev === field ? null : prev)), 2000);
     fetchData();
   }
@@ -77,14 +84,26 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
     const data = await res.json();
     if (!res.ok) {
       setMissing(data.missing ?? [data.error]);
+      setRequirements(data.requirements ?? []);
       setTimeout(() => missingRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 10);
       setAdvancing(false);
       return;
     }
     setMissing([]);
+    setRequirements([]);
     setStep(data.current_step);
+    setToast({ kind: "success", text: `Moved to Step ${data.current_step}.` });
+    setTimeout(() => setToast(null), 2500);
     setAdvancing(false);
     fetchData();
+  }
+
+  function relationshipCompleteness(rel: any) {
+    return {
+      hasName: Boolean(rel.related_person_name?.trim()),
+      hasStatus: Boolean(rel.status?.trim()),
+      hasEvidence: Boolean(rel.evidence_summary?.trim()),
+    };
   }
 
   async function saveRelationship(rel: any, patch: Record<string, unknown>) {
@@ -166,6 +185,32 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
     fetchData();
   }
 
+  async function quickAddSources(keepDecision = "Maybe") {
+    if (!quickSourceText.trim()) return;
+    setSavingSource(true);
+    const res = await fetch("/api/sources", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        person_id: personId,
+        person_name: person.full_name,
+        raw_text: quickSourceText,
+        keep_decision: keepDecision,
+      }),
+    });
+    const payload = await res.json();
+    setSavingSource(false);
+    if (!res.ok) {
+      setToast({ kind: "error", text: payload.error ?? "Bulk source import failed." });
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+    setToast({ kind: "success", text: `Quick add complete: created ${payload.created_count ?? 0}, skipped ${payload.skipped_count ?? 0}.` });
+    setTimeout(() => setToast(null), 3500);
+    setQuickSourceText("");
+    fetchData();
+  }
+
   if (!bundle) return <AppShell><p>Loading...</p></AppShell>;
 
   const person = bundle.person;
@@ -174,6 +219,15 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
   const hints = bundle.hints ?? [];
   const evidence = bundle.evidence ?? [];
   const nextSteps = bundle.next_steps ?? [];
+  const audit = bundle.audit ?? {
+    scorecard: [],
+    proofMatrix: [],
+    missingFacts: [],
+    weakProofs: [],
+    conflicts: [],
+    suggestedSearches: [],
+    summary: { source_sites: [] },
+  };
 
   const connectingChildWarning = relationships.find(
     (r: any) =>
@@ -193,11 +247,63 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
     }
   }
 
+  async function createStandardRelationships() {
+    const needed = ["Spouse", "Connecting Child", "Father", "Mother"].filter(
+      (type) => !relationships.some((r: any) => r.relationship_type === type),
+    );
+    for (const relationship_type of needed) {
+      await fetch("/api/relationships", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          person_id: personId,
+          person_name: person.full_name,
+          relationship_type,
+          status: "Needs Proof",
+        }),
+      });
+    }
+    setToast({ kind: "success", text: `Added ${needed.length} standard relationship card(s).` });
+    setTimeout(() => setToast(null), 3000);
+    fetchData();
+  }
+
   return (
     <AppShell>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[16rem_1fr_18rem]">
         <aside className="space-y-3">
           <PersonCard person={person} />
+          <div className="rounded border bg-white p-3">
+            <p className="font-semibold">Research Scorecard</p>
+            <div className="mt-2 space-y-2 text-sm">
+              {audit.scorecard.map((item: any) => (
+                <div key={item.label} className="flex items-center justify-between">
+                  <span>{item.label}</span>
+                  <span className={`rounded px-2 py-1 text-xs ${item.status === "Proven" ? "bg-green-100 text-green-900" : item.status === "Partial" ? "bg-amber-100 text-amber-900" : "bg-red-100 text-red-900"}`}>
+                    {item.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded border bg-white p-3">
+            <p className="font-semibold">Proof Matrix</p>
+            <div className="mt-2 space-y-2 text-sm">
+              {audit.proofMatrix.map((item: any) => (
+                <div key={item.key} className="rounded border p-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{item.label}</span>
+                    <span className={`rounded px-2 py-1 text-xs ${item.status === "Proven" ? "bg-green-100 text-green-900" : item.status === "Partial" ? "bg-amber-100 text-amber-900" : "bg-red-100 text-red-900"}`}>{item.status}</span>
+                  </div>
+                  {item.supporting?.length > 0 ? (
+                    <p className="mt-1 text-xs text-slate-600">Sources: {item.supporting.join("; ")}</p>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-500">No supporting source tagged yet.</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
           <div className="rounded border bg-white p-3">
             <StepProgressBar currentStep={step} totalSteps={7} isFastTrack={person.is_fast_track} />
             <div className="mt-3 space-y-1">
@@ -216,6 +322,7 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
             <button className="rounded border border-red-300 px-3 py-2 text-sm text-red-700" onClick={deleteCurrentPerson}>Delete Person</button>
           </div>
           {successMessage ? <div className="rounded bg-green-100 p-2 text-sm text-green-900">{successMessage}</div> : null}
+          {toast ? <div className={`rounded p-2 text-sm ${toast.kind === "success" ? "bg-green-100 text-green-900" : "bg-red-100 text-red-900"}`}>{toast.text}</div> : null}
 
           {step === 1 && (
             <div className="space-y-3">
@@ -279,13 +386,25 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
 
           {step === 2 && (
             <div className="space-y-3">
+              <div className="rounded border p-3">
+                <p className="font-semibold">Quick Add Sources</p>
+                <p className="mt-1 text-xs text-slate-600">Paste one source per line (title and optional URL).</p>
+                <textarea className="mt-2 h-24 w-full rounded border p-2" value={quickSourceText} onChange={(e) => setQuickSourceText(e.target.value)} />
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button className="rounded bg-[#2F75B6] px-3 py-2 text-white disabled:opacity-60" disabled={savingSource} onClick={() => quickAddSources("Maybe")}>Import</button>
+                  <button className="rounded border px-3 py-2 disabled:opacity-60" disabled={savingSource} onClick={() => quickAddSources("Clue Only")}>Set all to Clue Only</button>
+                  <button className="rounded border px-3 py-2 disabled:opacity-60" disabled={savingSource} onClick={() => quickAddSources("Keep")}>Set all to Keep</button>
+                </div>
+              </div>
+
               {sources.map((source: any) => (
                 <div key={source.id} className="rounded border p-3 text-sm">
                   <button className="flex w-full items-center justify-between text-left" onClick={() => setExpandedSourceId((id) => (id === source.id ? null : source.id))}>
                     <span className="font-semibold">{source.source_title}</span>
                     <span>{expandedSourceId === source.id ? "▾" : "▸"}</span>
                   </button>
-                  <div className="mt-1"><QualityTierBadge tier={source.source_quality_tier ?? "Unknown"} /></div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2"><QualityTierBadge tier={source.source_quality_tier ?? "Unknown"} /><span className="rounded bg-slate-100 px-2 py-1 text-xs">Keep: {source.keep_decision ?? "Maybe"}</span><span className="rounded bg-slate-100 px-2 py-1 text-xs">Tier: {source.source_quality_tier ?? "Unknown"}</span><span className="rounded bg-slate-100 px-2 py-1 text-xs">Needs review: {source.what_it_proves ? "No" : "Yes"}</span></div>
+                  <div className="mt-1 text-xs text-slate-500">Site: {inferSourceSite(source)}</div>
                   {source.source_quality_tier === "Family Tree / Other" && <p className="mt-2 rounded bg-red-100 p-2 text-red-900">⚠ This is another person&apos;s tree - NOT evidence. Find the real record this tree claims to prove.</p>}
 
                   {expandedSourceId === source.id && (
@@ -293,7 +412,7 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
                       <textarea className="w-full rounded border p-2" value={source.what_it_says ?? ""} onChange={(e) => setBundle((prev: any) => ({ ...prev, sources: prev.sources.map((s: any) => s.id === source.id ? { ...s, what_it_says: e.target.value } : s) }))} onBlur={(e) => fetch(`/api/sources/${source.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ what_it_says: e.currentTarget.value }) })} placeholder="What It Says" />
                       <textarea className="w-full rounded border p-2" value={source.what_it_proves ?? ""} onChange={(e) => setBundle((prev: any) => ({ ...prev, sources: prev.sources.map((s: any) => s.id === source.id ? { ...s, what_it_proves: e.target.value } : s) }))} onBlur={(e) => fetch(`/api/sources/${source.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ what_it_proves: e.currentTarget.value }) })} placeholder="What It Proves" />
                       <textarea className="w-full rounded border p-2" value={source.what_it_does_not_prove ?? ""} onChange={(e) => setBundle((prev: any) => ({ ...prev, sources: prev.sources.map((s: any) => s.id === source.id ? { ...s, what_it_does_not_prove: e.target.value } : s) }))} onBlur={(e) => fetch(`/api/sources/${source.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ what_it_does_not_prove: e.currentTarget.value }) })} placeholder="What It Does NOT Prove" />
-                      <select className="rounded border p-2" value={source.keep_decision ?? "Maybe"} onChange={async (e) => { await fetch(`/api/sources/${source.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_decision: e.target.value }) }); fetchData(); }}>
+                      <select className="rounded border p-2" value={source.keep_decision ?? "Maybe"} onChange={async (e) => { if (source.source_quality_tier === "Family Tree / Other" && e.target.value === "Keep") { const okay = window.confirm("This source is Family Tree / Other and should usually not be kept as evidence. Keep anyway?"); if (!okay) return; } await fetch(`/api/sources/${source.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_decision: e.target.value }) }); fetchData(); }}>
                         <option>Keep</option><option>Maybe</option><option>No</option><option>Clue Only</option>
                       </select>
                     </div>
@@ -303,11 +422,11 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
 
               <div className="rounded border p-3">
                 <p className="font-semibold">Parse Ancestry Record Text</p>
-                <p className="mt-1 text-xs text-slate-600">On Ancestry, open a record -&gt; click Detail tab -&gt; Ctrl+A to select all -&gt; Ctrl+C -&gt; paste here</p>
+                <p className="mt-1 text-xs text-slate-600">Paste record details from Ancestry or FamilySearch. Best results come from a detail tab / full record text block.</p>
                 <textarea className="mt-2 h-24 w-full rounded border p-2" value={recordText} onChange={(e) => setRecordText(e.target.value)} />
                 <div className="mt-2 flex gap-2">
-                  <button className="rounded border px-3 py-2" onClick={async () => { await fetch("/api/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person_id: personId, person_name: person.full_name, source_title: "New Source", keep_decision: "Maybe", source_quality_tier: "Unknown", downloaded: false }) }); fetchData(); }}>Add Blank Source</button>
-                  <button className="rounded bg-[#2F75B6] px-3 py-2 text-white" onClick={async () => { const parsed = await fetch("/api/parse/record", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: recordText }) }).then((r) => r.json()); await fetch("/api/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person_id: personId, person_name: person.full_name, source_title: `${parsed.recordType} Parsed Source`, what_it_says: parsed.says, what_it_proves: parsed.proves, what_it_does_not_prove: parsed.notProves, source_quality_tier: parsed.recordType === "Census" ? "Original Record" : "Unknown", keep_decision: "Maybe", downloaded: false }) }); fetchData(); }}>Parse + Save Source</button>
+                  <button className="rounded border px-3 py-2 disabled:opacity-60" disabled={savingSource} onClick={async () => { setSavingSource(true); await fetch("/api/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person_id: personId, person_name: person.full_name, source_title: "New Source", keep_decision: "Maybe", source_quality_tier: "Unknown", downloaded: false }) }); setSavingSource(false); fetchData(); }}>Add Blank Source</button>
+                  <button className="rounded bg-[#2F75B6] px-3 py-2 text-white disabled:opacity-60" disabled={savingSource} onClick={async () => { setSavingSource(true); const parsed = await fetch("/api/parse/record", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: recordText }) }).then((r) => r.json()); await fetch("/api/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person_id: personId, person_name: person.full_name, source_title: `${parsed.recordType} Parsed Source`, what_it_says: parsed.says, what_it_proves: parsed.proves, what_it_does_not_prove: parsed.notProves, source_quality_tier: parsed.recordType === "Census" ? "Original Record" : "Unknown", keep_decision: "Maybe", downloaded: false }) }); setSavingSource(false); setSuccessMessage(`Parsed ${parsed.recordType} (${parsed.confidence} confidence).`); fetchData(); }}>Parse + Save Source</button>
                 </div>
               </div>
             </div>
@@ -315,9 +434,15 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
 
           {step === 3 && (
             <div className="space-y-3">
+              <button className="rounded border px-3 py-2 text-sm" onClick={createStandardRelationships}>Create standard relationship set</button>
               {relationships.filter((r: any) => ["Spouse", "Connecting Child", "Father", "Mother"].includes(r.relationship_type)).map((rel: any) => (
                 <div key={rel.id} className="rounded border p-3">
                   <p className="font-semibold">{rel.relationship_type}</p>
+                  <div className="mt-1 flex gap-2 text-xs">
+                    <span className="rounded bg-slate-100 px-2 py-1">Name: {relationshipCompleteness(rel).hasName ? "Set" : "Missing"}</span>
+                    <span className="rounded bg-slate-100 px-2 py-1">Status: {relationshipCompleteness(rel).hasStatus ? "Set" : "Missing"}</span>
+                    <span className="rounded bg-slate-100 px-2 py-1">Evidence: {relationshipCompleteness(rel).hasEvidence ? "Added" : "Missing"}</span>
+                  </div>
                   <div className="mt-2 grid gap-2 md:grid-cols-2">
                     <input className="rounded border p-2" placeholder="Related person name" defaultValue={rel.related_person_name ?? ""} onBlur={(e) => saveRelationship(rel, { related_person_name: e.currentTarget.value })} />
                     <select className="rounded border p-2" defaultValue={rel.status} onChange={(e) => saveRelationship(rel, { status: e.currentTarget.value })}>
@@ -336,6 +461,10 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
           {step === 4 && (
             <div className="space-y-3">
               <button className="rounded border px-3 py-2" onClick={() => setShowNegativeForm((v) => !v)}>Log a Negative Search</button>
+              <div className="flex flex-wrap gap-2">
+                <button className="rounded border px-2 py-1 text-xs" onClick={() => setNegativeForm((f) => ({ ...f, site: "Ancestry", search_terms: `${person.full_name} census`, result_description: "Searched expected census year and place; no convincing match." }))}>Prefill: Missing census</button>
+                <button className="rounded border px-2 py-1 text-xs" onClick={() => setNegativeForm((f) => ({ ...f, site: "FamilySearch", search_terms: `${person.full_name} birth`, result_description: "Searched indexed births with variants; no reliable candidate." }))}>Prefill: Missing birth</button>
+              </div>
               {showNegativeForm && (
                 <div className="rounded border bg-slate-50 p-3 text-sm">
                   <div className="grid gap-2 md:grid-cols-2">
@@ -361,7 +490,21 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
           {step === 6 && !person.is_fast_track && <Checklist savePerson={savePersonField} />}
           {step === 7 && <NextStepSection personId={personId} person={person} nextSteps={nextSteps} refresh={fetchData} savePerson={savePersonField} />}
 
-          {missing.length > 0 && <div ref={missingRef} className="rounded bg-red-100 p-2 text-sm text-red-900">{missing.join(", ")}</div>}
+          {missing.length > 0 && (
+            <div ref={missingRef} className="rounded bg-red-100 p-2 text-sm text-red-900">
+              <p className="font-semibold">Cannot advance yet:</p>
+              <ul className="ml-4 list-disc">
+                {missing.map((m) => <li key={m}>{m}</li>)}
+              </ul>
+              {requirements.length > 0 ? (
+                <div className="mt-2 rounded bg-white/70 p-2 text-xs text-red-950">
+                  {requirements.map((r: any) => (
+                    <div key={`${r.step}-${r.label}`}>{r.met ? "✓" : "•"} Step {r.step}: {r.label}</div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )}
 
           <div className="flex justify-between">
             <button className="rounded border px-3 py-2" onClick={() => setStep((s) => Math.max(1, s - 1))}>Back</button>
@@ -373,6 +516,15 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
 
         <aside className="space-y-3">
           <RedFlagPanel person={person} sources={sources} relationships={relationships} />
+          <div className="rounded border bg-white p-3">
+            <p className="font-semibold">Audit Warnings</p>
+            <div className="mt-2 space-y-2 text-sm">
+              {audit.missingFacts.length > 0 ? <div><p className="font-medium text-amber-800">Missing important data</p>{audit.missingFacts.map((item: string) => <div key={item} className="text-slate-700">{item}</div>)}</div> : null}
+              {audit.weakProofs.length > 0 ? <div><p className="font-medium text-amber-800">Weak proof</p>{audit.weakProofs.map((item: string) => <div key={item} className="text-slate-700">{item}</div>)}</div> : null}
+              {audit.conflicts.length > 0 ? <div><p className="font-medium text-red-800">Conflicts</p>{audit.conflicts.map((item: string) => <div key={item} className="text-slate-700">{item}</div>)}</div> : null}
+              {audit.suggestedSearches.length > 0 ? <div><p className="font-medium text-slate-800">Suggested next checks</p>{audit.suggestedSearches.map((item: string) => <div key={item} className="text-slate-700">{item}</div>)}</div> : null}
+            </div>
+          </div>
           <div className="rounded border bg-white p-3">
             <p className="font-semibold">Open next steps</p>
             {nextSteps.filter((n: any) => !n.done).map((n: any) => <div key={n.id} className="mt-2 rounded border p-2 text-sm">{n.task}</div>)}

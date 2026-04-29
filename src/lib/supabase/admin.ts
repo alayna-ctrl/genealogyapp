@@ -17,6 +17,20 @@ function ensure(name: string, value: string | undefined) {
   }
 }
 
+export function checkAdminEnvReadiness() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const missing: string[] = [];
+  if (!url || PLACEHOLDER_VALUES.has(url)) missing.push("NEXT_PUBLIC_SUPABASE_URL");
+  if (!anon || PLACEHOLDER_VALUES.has(anon)) missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  if (!serviceKey || PLACEHOLDER_VALUES.has(serviceKey)) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  return {
+    ok: missing.length === 0,
+    missing,
+  };
+}
+
 export function createAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
