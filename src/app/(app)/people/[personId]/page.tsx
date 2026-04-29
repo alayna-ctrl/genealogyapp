@@ -41,6 +41,7 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
   const [parsedProfile, setParsedProfile] = useState<any | null>(null);
   const [connectingChildSelection, setConnectingChildSelection] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [advancing, setAdvancing] = useState(false);
   const missingRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { params.then((p) => setPersonId(p.personId)); }, [params]);
@@ -65,6 +66,7 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
   }
 
   async function advanceStep() {
+    setAdvancing(true);
     const res = await fetch(`/api/people/${personId}/advance-step`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -74,10 +76,12 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
     if (!res.ok) {
       setMissing(data.missing ?? [data.error]);
       setTimeout(() => missingRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 10);
+      setAdvancing(false);
       return;
     }
     setMissing([]);
     setStep(data.current_step);
+    setAdvancing(false);
     fetchData();
   }
 
@@ -198,6 +202,15 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
 
           {step === 1 && (
             <div className="space-y-3">
+              <label className="text-sm">
+                Main Research Question
+                <textarea
+                  className="mt-1 w-full rounded border p-2"
+                  defaultValue={person.main_question ?? ""}
+                  onBlur={(e) => savePersonField("main_question", e.currentTarget.value)}
+                />
+                {savedField === "main_question" ? <span className="text-xs text-green-700">Saved ✓</span> : null}
+              </label>
               <div className="grid gap-2 md:grid-cols-2">
                 {[["birth_date", "Birth Date"], ["birth_place", "Birth Place"], ["death_date", "Death Date"], ["death_place", "Death Place"], ["spouse_name", "Spouse"], ["marriage_date", "Marriage Date"], ["father_name", "Father"], ["mother_name", "Mother"], ["connecting_child", "Connecting Child"], ["ancestry_profile_url", "Ancestry URL"]].map(([field, label]) => (
                   <label key={field} className="text-sm">
@@ -322,7 +335,7 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
             </div>
           )}
 
-          {step === 5 && !person.is_fast_track && <SimpleEvidence personId={personId} person={person} current={evidence[0]} refresh={fetchData} />}
+          {step === 5 && !person.is_fast_track && <SimpleEvidence key={evidence[0]?.id ?? "new-evidence"} personId={personId} person={person} current={evidence[0]} refresh={fetchData} />}
           {step === 6 && !person.is_fast_track && <Checklist savePerson={savePersonField} />}
           {step === 7 && <NextStepSection personId={personId} person={person} nextSteps={nextSteps} refresh={fetchData} savePerson={savePersonField} />}
 
@@ -330,7 +343,9 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
 
           <div className="flex justify-between">
             <button className="rounded border px-3 py-2" onClick={() => setStep((s) => Math.max(1, s - 1))}>Back</button>
-            <button className="rounded bg-green-700 px-3 py-2 text-white" onClick={advanceStep}>Advance Step</button>
+            <button className="rounded bg-green-700 px-3 py-2 text-white disabled:opacity-60" onClick={advanceStep} disabled={advancing}>
+              {advancing ? "Advancing..." : "Advance Step"}
+            </button>
           </div>
         </section>
 
@@ -364,7 +379,14 @@ function SimpleEvidence({ personId, person, current, refresh }: any) {
 
 function Checklist({ savePerson }: any) {
   const [checks, setChecks] = useState([false, false, false, false, false]);
-  useEffect(() => { savePerson("cleanup_note_added", checks.every(Boolean)); }, [checks, savePerson]);
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    savePerson("cleanup_note_added", checks.every(Boolean));
+  }, [checks, savePerson]);
   const labels = ["Copied cleanup note into Ancestry profile Notes", "Attached sources marked Keep", "Removed or detached sources marked No", "Corrected main facts based on research", "Updated birth/death dates if needed"];
   return <div className="space-y-2">{labels.map((label, i) => <label key={label} className="flex items-center gap-2"><input type="checkbox" checked={checks[i]} onChange={(e) => setChecks((prev) => prev.map((v, idx) => idx === i ? e.target.checked : v))} />{label}</label>)}</div>;
 }

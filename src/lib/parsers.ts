@@ -235,7 +235,7 @@ export function parseRecordText(text: string): ParseRecordResult {
     saysLines.push("Household Members:");
     saysLines.push(...household);
   }
-  const says = saysLines.join("\\n");
+  const says = saysLines.join("\n");
 
   let proves = "Record details extracted for review.";
   let notProves = "Does not prove all relationships by itself.";
