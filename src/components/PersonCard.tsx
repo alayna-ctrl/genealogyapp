@@ -9,6 +9,7 @@ export function PersonCard({ person }: { person: Person }) {
       <p className="font-semibold text-[#1F3864]">{person.full_name}</p>
       <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
         <span>Gen {person.generation_number ?? "-"}</span>
+        {person.generation_number === 0 && <span className="rounded bg-violet-100 px-2 py-0.5 text-violet-900">Starting person</span>}
         {person.is_direct_line && <span className="rounded bg-blue-100 px-2 py-0.5">Direct line</span>}
         {person.is_fast_track && <span className="rounded bg-amber-100 px-2 py-0.5">⚡ Fast Track</span>}
       </div>

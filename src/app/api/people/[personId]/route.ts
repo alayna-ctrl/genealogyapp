@@ -43,10 +43,24 @@ export async function PUT(request: Request, { params }: { params: Promise<{ pers
   const { personId } = await params;
   const { supabase, user } = auth;
   const body = await request.json();
+  const setAsStartingPerson = Boolean(body.set_as_starting_person);
+
+  if (setAsStartingPerson) {
+    await supabase
+      .from("people")
+      .update({ generation_number: null })
+      .eq("user_id", user.id)
+      .eq("generation_number", 0)
+      .neq("person_id", personId);
+  }
 
   const { data, error } = await supabase
     .from("people")
-    .update({ ...body, last_worked_at: new Date().toISOString() })
+    .update({
+      ...body,
+      ...(setAsStartingPerson ? { generation_number: 0, is_direct_line: true } : {}),
+      last_worked_at: new Date().toISOString(),
+    })
     .eq("user_id", user.id)
     .eq("person_id", personId)
     .select("*")

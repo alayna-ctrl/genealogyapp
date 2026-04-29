@@ -4,7 +4,6 @@
 import { AppShell } from "@/components/app-shell";
 import { PersonCard } from "@/components/PersonCard";
 import { QualityTierBadge } from "@/components/QualityTierBadge";
-import { RedFlagPanel } from "@/components/RedFlagPanel";
 import { StepProgressBar } from "@/components/StepProgressBar";
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -26,6 +25,8 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
   const [bundle, setBundle] = useState<any>(null);
   const [step, setStep] = useState(1);
   const [profileText, setProfileText] = useState("");
+  const [profileFile, setProfileFile] = useState<File | null>(null);
+  const [parsingDocument, setParsingDocument] = useState(false);
   const [recordText, setRecordText] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
   const [requirements, setRequirements] = useState<any[]>([]);
@@ -35,7 +36,6 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
   const [negativeForm, setNegativeForm] = useState({ type: "Manual Search", decision: "Logged - Nothing Found", site: "", search_terms: "", result_description: "" });
   const [parsedProfile, setParsedProfile] = useState<any | null>(null);
   const [connectingChildSelection, setConnectingChildSelection] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
   const [advancing, setAdvancing] = useState(false);
   const [savingSource, setSavingSource] = useState(false);
   const [quickSourceText, setQuickSourceText] = useState("");
@@ -128,6 +128,29 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
     setConnectingChildSelection(parsed.children?.[0] ?? "");
   }
 
+  async function parseProfileDocument() {
+    if (!profileFile) return;
+    setParsingDocument(true);
+    const form = new FormData();
+    form.append("file", profileFile);
+    const res = await fetch("/api/parse/document", {
+      method: "POST",
+      body: form,
+    });
+    const payload = await res.json();
+    setParsingDocument(false);
+    if (!res.ok) {
+      setToast({ kind: "error", text: payload.error ?? "Could not parse uploaded document." });
+      setTimeout(() => setToast(null), 3500);
+      return;
+    }
+    setProfileText(payload.text ?? "");
+    setParsedProfile(payload.parsed ?? null);
+    setConnectingChildSelection(payload.parsed?.children?.[0] ?? "");
+    setToast({ kind: "success", text: `Parsed document: ${profileFile.name}` });
+    setTimeout(() => setToast(null), 2500);
+  }
+
   async function confirmParsedProfileApply(person: any) {
     if (!parsedProfile) return;
     await fetch(`/api/people/${personId}`, {
@@ -179,7 +202,8 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
       created += 1;
     }
 
-    setSuccessMessage(`Profile applied. Created ${created} source row(s).`);
+    setToast({ kind: "success", text: `Profile applied. Created ${created} source row(s).` });
+    setTimeout(() => setToast(null), 3000);
     setParsedProfile(null);
     setProfileText("");
     fetchData();
@@ -268,60 +292,96 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
     fetchData();
   }
 
+  async function setAsStartingPerson() {
+    const res = await fetch(`/api/people/${personId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ set_as_starting_person: true }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setToast({ kind: "error", text: payload.error ?? "Could not set starting person." });
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+    setToast({ kind: "success", text: `${person.full_name} is now the starting person.` });
+    setTimeout(() => setToast(null), 3000);
+    fetchData();
+  }
+
+  const openTaskCount = nextSteps.filter((n: any) => !n.done).length;
+
   return (
     <AppShell>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[16rem_1fr_18rem]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[16rem_1fr]">
         <aside className="space-y-3">
           <PersonCard person={person} />
+
+          {/* Compact Research Status strip */}
           <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3">
-            <p className="font-semibold">Research Scorecard</p>
-            <div className="mt-2 space-y-2 text-sm">
-              {audit.scorecard.map((item: any) => (
-                <div key={item.label} className="flex items-center justify-between">
-                  <span>{item.label}</span>
-                  <span className={`ui-chip ${item.status === "Proven" ? "bg-green-100 text-green-900" : item.status === "Partial" ? "bg-amber-100 text-amber-900" : "bg-red-100 text-red-900"}`}>
-                    {item.status}
-                  </span>
-                </div>
-              ))}
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold">Facts Proven</p>
+              <span className="ui-chip bg-indigo-100 text-indigo-900 text-xs">
+                {audit.proofMatrix.filter((i: any) => i.status === "Proven").length}/{audit.proofMatrix.length}
+              </span>
             </div>
-          </div>
-          <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-3">
-            <p className="font-semibold">Proof Matrix</p>
-            <div className="mt-2 space-y-2 text-sm">
+            <div className="mt-2 flex flex-wrap gap-1">
               {audit.proofMatrix.map((item: any) => (
-                <div key={item.key} className="rounded-xl border border-violet-100 bg-white/70 p-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">{item.label}</span>
-                    <span className={`ui-chip ${item.status === "Proven" ? "bg-green-100 text-green-900" : item.status === "Partial" ? "bg-amber-100 text-amber-900" : "bg-red-100 text-red-900"}`}>{item.status}</span>
-                  </div>
-                  {item.supporting?.length > 0 ? (
-                    <p className="mt-1 text-xs text-slate-600">Sources: {item.supporting.join("; ")}</p>
-                  ) : (
-                    <p className="mt-1 text-xs text-slate-500">No supporting source tagged yet.</p>
-                  )}
-                </div>
+                <span
+                  key={item.key}
+                  title={`${item.label}: ${item.status}`}
+                  className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs ${item.status === "Proven" ? "bg-green-100 text-green-900" : item.status === "Partial" ? "bg-amber-100 text-amber-900" : "bg-red-100 text-red-900"}`}
+                >
+                  <span className={`h-2 w-2 rounded-full ${item.status === "Proven" ? "bg-green-500" : item.status === "Partial" ? "bg-amber-400" : "bg-red-400"}`} />
+                  {item.label}
+                </span>
               ))}
             </div>
           </div>
+
+          {/* Guided step nav */}
           <div className="rounded-xl border border-cyan-100 bg-cyan-50/40 p-3">
             <StepProgressBar currentStep={step} totalSteps={7} isFastTrack={person.is_fast_track} />
             <div className="mt-3 space-y-1">
-              {STEPS.map((name, i) => (
-                <button key={name} className={`block w-full rounded px-2 py-1 text-left text-sm ${step === i + 1 ? "bg-fuchsia-100/80" : "hover:bg-white/70"}`} onClick={() => setStep(i + 1)}>
-                  Step {i + 1}: {name}
-                </button>
-              ))}
+              {STEPS.map((name, i) => {
+                const stepNum = i + 1;
+                const isDone = stepNum < step;
+                const isCurrent = stepNum === step;
+                return (
+                  <button
+                    key={name}
+                    className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${isCurrent ? "border border-fuchsia-200 bg-fuchsia-100/80 font-medium" : "hover:bg-white/70"}`}
+                    onClick={() => setStep(stepNum)}
+                  >
+                    <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${isDone ? "bg-green-400" : isCurrent ? "bg-fuchsia-400" : "bg-slate-300"}`} />
+                    <span>Step {stepNum}: {name}</span>
+                  </button>
+                );
+              })}
             </div>
+            {openTaskCount > 0 && (
+              <button
+                className="mt-3 w-full rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-900 hover:bg-emerald-100"
+                onClick={() => setStep(7)}
+              >
+                {openTaskCount} open task{openTaskCount !== 1 ? "s" : ""} — view in Step 7
+              </button>
+            )}
           </div>
         </aside>
 
         <section className="space-y-4 rounded-xl border border-rose-100 bg-rose-50/30 p-4">
           <div className="flex items-center justify-between gap-2">
             <h1 className="text-xl font-semibold text-[#1F3864]">Step {step}: {STEPS[step - 1]}</h1>
-            <button className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700" onClick={deleteCurrentPerson}>Delete Person</button>
+            <div className="flex gap-2">
+              {person.generation_number === 0 ? (
+                <span className="ui-chip border border-violet-200 bg-violet-100/70 text-violet-900">Starting Person</span>
+              ) : (
+                <button className="ui-btn-soft" onClick={setAsStartingPerson}>Set as Starting Person</button>
+              )}
+              <button className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700" onClick={deleteCurrentPerson}>Delete Person</button>
+            </div>
           </div>
-          {successMessage ? <div className="ui-alert-success">{successMessage}</div> : null}
           {toast ? <div className={toast.kind === "success" ? "ui-alert-success" : "ui-alert-error"}>{toast.text}</div> : null}
 
           {step === 1 && (
@@ -358,7 +418,19 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
               <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-3">
                 <p className="font-semibold">Parse Ancestry Profile</p>
                 <textarea className="ui-input mt-2 h-28" value={profileText} onChange={(e) => setProfileText(e.target.value)} />
-                <button className="ui-btn-primary mt-2" onClick={parseProfile}>Parse</button>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button className="ui-btn-primary" onClick={parseProfile}>Parse Text</button>
+                  <input
+                    type="file"
+                    accept=".pdf,image/*"
+                    className="text-xs"
+                    onChange={(e) => setProfileFile(e.target.files?.[0] ?? null)}
+                  />
+                  <button className="ui-btn-soft disabled:opacity-60" disabled={!profileFile || parsingDocument} onClick={parseProfileDocument}>
+                    {parsingDocument ? "Parsing..." : "Parse Uploaded File"}
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-slate-600">PDF with selectable text is supported now. Image OCR support is next.</p>
 
                 {parsedProfile && (
                   <div className="mt-3 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 text-sm">
@@ -403,7 +475,7 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
                     <span className="font-semibold">{source.source_title}</span>
                     <span>{expandedSourceId === source.id ? "▾" : "▸"}</span>
                   </button>
-                  <div className="mt-1 flex flex-wrap items-center gap-2"><QualityTierBadge tier={source.source_quality_tier ?? "Unknown"} /><span className="ui-chip bg-fuchsia-100 text-fuchsia-900">Keep: {source.keep_decision ?? "Maybe"}</span><span className="ui-chip bg-indigo-100 text-indigo-900">Tier: {source.source_quality_tier ?? "Unknown"}</span><span className="ui-chip bg-cyan-100 text-cyan-900">Needs review: {source.what_it_proves ? "No" : "Yes"}</span></div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2"><QualityTierBadge tier={source.source_quality_tier ?? "Unknown"} /><span className="ui-chip bg-fuchsia-100 text-fuchsia-900">Keep: {source.keep_decision ?? "Maybe"}</span><span className="ui-chip bg-cyan-100 text-cyan-900">Needs review: {source.what_it_proves ? "No" : "Yes"}</span></div>
                   <div className="mt-1 text-xs text-slate-500">Site: {inferSourceSite(source)}</div>
                   {source.source_quality_tier === "Family Tree / Other" && <p className="mt-2 rounded bg-red-100 p-2 text-red-900">⚠ This is another person&apos;s tree - NOT evidence. Find the real record this tree claims to prove.</p>}
 
@@ -426,7 +498,7 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
                 <textarea className="ui-input mt-2 h-24" value={recordText} onChange={(e) => setRecordText(e.target.value)} />
                 <div className="mt-2 flex gap-2">
                   <button className="rounded border border-slate-300 bg-white/70 px-3 py-2 disabled:opacity-60" disabled={savingSource} onClick={async () => { setSavingSource(true); await fetch("/api/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person_id: personId, person_name: person.full_name, source_title: "New Source", keep_decision: "Maybe", source_quality_tier: "Unknown", downloaded: false }) }); setSavingSource(false); fetchData(); }}>Add Blank Source</button>
-                  <button className="ui-btn-primary disabled:opacity-60" disabled={savingSource} onClick={async () => { setSavingSource(true); const parsed = await fetch("/api/parse/record", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: recordText }) }).then((r) => r.json()); await fetch("/api/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person_id: personId, person_name: person.full_name, source_title: `${parsed.recordType} Parsed Source`, what_it_says: parsed.says, what_it_proves: parsed.proves, what_it_does_not_prove: parsed.notProves, source_quality_tier: parsed.recordType === "Census" ? "Original Record" : "Unknown", keep_decision: "Maybe", downloaded: false }) }); setSavingSource(false); setSuccessMessage(`Parsed ${parsed.recordType} (${parsed.confidence} confidence).`); fetchData(); }}>Parse + Save Source</button>
+                  <button className="ui-btn-primary disabled:opacity-60" disabled={savingSource} onClick={async () => { setSavingSource(true); const parsed = await fetch("/api/parse/record", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: recordText }) }).then((r) => r.json()); await fetch("/api/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person_id: personId, person_name: person.full_name, source_title: `${parsed.recordType} Parsed Source`, what_it_says: parsed.says, what_it_proves: parsed.proves, what_it_does_not_prove: parsed.notProves, source_quality_tier: parsed.recordType === "Census" ? "Original Record" : "Unknown", keep_decision: "Maybe", downloaded: false }) }); setSavingSource(false); setToast({ kind: "success", text: `Parsed ${parsed.recordType} (${parsed.confidence} confidence).` }); setTimeout(() => setToast(null), 3000); fetchData(); }}>Parse + Save Source</button>
                 </div>
               </div>
             </div>
@@ -512,24 +584,9 @@ export default function PersonWorkflowPage({ params }: { params: Promise<{ perso
               {advancing ? "Advancing..." : "Advance Step"}
             </button>
           </div>
-        </section>
 
-        <aside className="space-y-3">
-          <RedFlagPanel person={person} sources={sources} relationships={relationships} />
-          <div className="rounded-xl border border-amber-100 bg-amber-50/40 p-3">
-            <p className="font-semibold">Audit Warnings</p>
-            <div className="mt-2 space-y-2 text-sm">
-              {audit.missingFacts.length > 0 ? <div><p className="font-medium text-amber-800">Missing important data</p>{audit.missingFacts.map((item: string) => <div key={item} className="text-slate-700">{item}</div>)}</div> : null}
-              {audit.weakProofs.length > 0 ? <div><p className="font-medium text-amber-800">Weak proof</p>{audit.weakProofs.map((item: string) => <div key={item} className="text-slate-700">{item}</div>)}</div> : null}
-              {audit.conflicts.length > 0 ? <div><p className="font-medium text-red-800">Conflicts</p>{audit.conflicts.map((item: string) => <div key={item} className="text-slate-700">{item}</div>)}</div> : null}
-              {audit.suggestedSearches.length > 0 ? <div><p className="font-medium text-slate-800">Suggested next checks</p>{audit.suggestedSearches.map((item: string) => <div key={item} className="text-slate-700">{item}</div>)}</div> : null}
-            </div>
-          </div>
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
-            <p className="font-semibold">Open next steps</p>
-            {nextSteps.filter((n: any) => !n.done).map((n: any) => <div key={n.id} className="mt-2 rounded-xl border border-slate-200 bg-white/70 p-2 text-sm">{n.task}</div>)}
-          </div>
-        </aside>
+          <AuditDrawer audit={audit} person={person} sources={sources} relationships={relationships} />
+        </section>
       </div>
     </AppShell>
   );
@@ -569,4 +626,107 @@ function NextStepSection({ personId, person, nextSteps, refresh, savePerson }: a
   const [task, setTask] = useState("");
   const [priority, setPriority] = useState("Medium");
   return <div className="space-y-3"><div className="space-y-2">{nextSteps.map((n: any) => <div key={n.id} className="rounded-xl border border-slate-200 bg-white/70 p-2 text-sm">{n.task} ({n.priority})</div>)}</div><input className="w-full rounded border p-2" placeholder="Task" value={task} onChange={(e) => setTask(e.target.value)} /><select className="w-full rounded border p-2" value={priority} onChange={(e) => setPriority(e.target.value)}><option>High</option><option>Medium</option><option>Low</option></select><button className="rounded bg-indigo-300 px-3 py-2 text-indigo-950 hover:bg-indigo-200" onClick={async () => { await fetch("/api/nextsteps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person_id: personId, person_name: person.full_name, task, priority }) }); setTask(""); refresh(); }}>Add next step</button><button className="rounded bg-emerald-300 px-3 py-2 text-emerald-950 hover:bg-emerald-200" onClick={async () => { await savePerson("status", "Done for Now"); await savePerson("finished_at", new Date().toISOString()); refresh(); }}>Mark as Done for Now</button></div>;
+}
+
+type AuditDrawerProps = { audit: any; person: any; sources: any[]; relationships: any[] };
+
+function AuditDrawer({ audit, person, sources, relationships }: AuditDrawerProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  const conflictCount = audit.conflicts?.length ?? 0;
+  const missingCount = audit.missingFacts?.length ?? 0;
+  const weakCount = audit.weakProofs?.length ?? 0;
+  const allClear = conflictCount + missingCount + weakCount === 0;
+
+  // Red flags inline (extracted from RedFlagPanel logic)
+  const flags: { level: "red" | "yellow"; message: string }[] = [];
+  const parentRelated = sources.filter((s: any) => /parent|father|mother/i.test(s.what_it_proves ?? ""));
+  if (parentRelated.length > 0 && parentRelated.every((s: any) => s.source_quality_tier === "Family Tree / Other" || s.source_quality_tier === "Find A Grave")) {
+    flags.push({ level: "red", message: "🚩 Parents not proven by any original record. Do not go further back." });
+  }
+  const birthYear = person.birth_date?.match(/(\d{4})/)?.[1] ? Number(person.birth_date.match(/(\d{4})/)[1]) : null;
+  const deathYear = person.death_date?.match(/(\d{4})/)?.[1] ? Number(person.death_date.match(/(\d{4})/)[1]) : null;
+  if (birthYear && deathYear && deathYear < birthYear) flags.push({ level: "red", message: "🚩 Impossible dates: death year is before birth year." });
+  if (birthYear && birthYear < 1500) flags.push({ level: "red", message: "🚩 Birth year appears impossible (<1500)." });
+  if (person.concern && !person.concern.startsWith("[FAST TRACK]")) flags.push({ level: "yellow", message: `⚠ Open concern: ${person.concern}` });
+  relationships.forEach((rel: any) => {
+    if (rel.status === "Probably Wrong") flags.push({ level: "red", message: `🚩 ${rel.relationship_type} relationship marked Probably Wrong.` });
+    if (rel.status === "Conflict") flags.push({ level: "yellow", message: `⚠ ${rel.relationship_type} relationship marked Conflict.` });
+  });
+  const connectingChild = relationships.find((r: any) => r.relationship_type === "Connecting Child");
+  if (connectingChild && (connectingChild.status === "Needs Proof" || connectingChild.status === "Probably Wrong")) {
+    flags.push({ level: "red", message: "🚩 Connecting child not verified. Do not add ancestors until this link is proven." });
+  }
+
+  const redFlagCount = flags.filter((f) => f.level === "red").length;
+  const totalIssues = conflictCount + missingCount + weakCount + redFlagCount;
+
+  return (
+    <div className="rounded-xl border border-amber-100 bg-amber-50/30">
+      <button
+        className="flex w-full items-center justify-between px-4 py-3 text-left"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="text-sm font-semibold text-amber-900">
+          {allClear && redFlagCount === 0 ? "Audit — No issues found ✓" : `Audit — ${totalIssues} issue${totalIssues !== 1 ? "s" : ""}: ${conflictCount > 0 ? `${conflictCount} conflict${conflictCount !== 1 ? "s" : ""}` : ""}${conflictCount > 0 && (missingCount > 0 || weakCount > 0 || redFlagCount > 0) ? " · " : ""}${missingCount > 0 ? `${missingCount} missing` : ""}${missingCount > 0 && (weakCount > 0 || redFlagCount > 0) ? " · " : ""}${weakCount > 0 ? `${weakCount} weak` : ""}${weakCount > 0 && redFlagCount > 0 ? " · " : ""}${redFlagCount > 0 ? `${redFlagCount} flag${redFlagCount !== 1 ? "s" : ""}` : ""}`}
+        </span>
+        <span className="text-slate-500">{expanded ? "▾" : "▸"}</span>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-amber-100 px-4 pb-4 pt-3 space-y-4 text-sm">
+          {/* Red flags */}
+          {flags.length > 0 && (
+            <div>
+              <p className="font-semibold text-red-800 mb-1">Red Flags</p>
+              <div className="space-y-1">
+                {flags.map((flag, i) => (
+                  <div key={i} className={`rounded p-2 text-xs ${flag.level === "red" ? "bg-red-100 text-red-900" : "bg-yellow-100 text-yellow-900"}`}>{flag.message}</div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Proof matrix */}
+          {audit.proofMatrix?.length > 0 && (
+            <div>
+              <p className="font-semibold text-violet-800 mb-1">Proof Matrix</p>
+              <div className="grid gap-1 sm:grid-cols-2">
+                {audit.proofMatrix.map((item: any) => (
+                  <div key={item.key} className="rounded border border-violet-100 bg-white/70 p-2">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-medium text-xs">{item.label}</span>
+                      <span className={`ui-chip text-xs ${item.status === "Proven" ? "bg-green-100 text-green-900" : item.status === "Partial" ? "bg-amber-100 text-amber-900" : "bg-red-100 text-red-900"}`}>{item.status}</span>
+                    </div>
+                    {item.supporting?.length > 0 ? (
+                      <p className="mt-0.5 text-[11px] text-slate-500">Sources: {item.supporting.join("; ")}</p>
+                    ) : (
+                      <p className="mt-0.5 text-[11px] text-slate-400">No supporting source tagged yet.</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Audit warnings */}
+          {(missingCount > 0 || weakCount > 0 || conflictCount > 0 || (audit.suggestedSearches?.length ?? 0) > 0) && (
+            <div>
+              <p className="font-semibold text-amber-800 mb-1">Audit Warnings</p>
+              <div className="space-y-2">
+                {audit.missingFacts?.length > 0 && <div><p className="font-medium text-amber-800 text-xs">Missing important data</p>{audit.missingFacts.map((item: string) => <div key={item} className="text-slate-700 text-xs">{item}</div>)}</div>}
+                {audit.weakProofs?.length > 0 && <div><p className="font-medium text-amber-800 text-xs">Weak proof</p>{audit.weakProofs.map((item: string) => <div key={item} className="text-slate-700 text-xs">{item}</div>)}</div>}
+                {audit.conflicts?.length > 0 && <div><p className="font-medium text-red-800 text-xs">Conflicts</p>{audit.conflicts.map((item: string) => <div key={item} className="text-slate-700 text-xs">{item}</div>)}</div>}
+                {audit.suggestedSearches?.length > 0 && <div><p className="font-medium text-slate-800 text-xs">Suggested next checks</p>{audit.suggestedSearches.map((item: string) => <div key={item} className="text-slate-700 text-xs">{item}</div>)}</div>}
+              </div>
+            </div>
+          )}
+
+          {allClear && redFlagCount === 0 && (
+            <p className="rounded border border-green-200 bg-green-50 p-2 text-sm text-green-800">No issues found. This person looks well-researched!</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

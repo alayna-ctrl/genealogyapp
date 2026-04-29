@@ -148,16 +148,18 @@ export default function DashboardPage() {
             </div>
           ) : (
             <>
-              <div className="grid gap-3 md:grid-cols-4">
-                <Stat label="Total" value={data.total_people} />
-                {Object.entries(data.counts ?? {}).map(([k, v]) => (
-                  <Stat key={k} label={k} value={v} />
-                ))}
+              {/* Row 1: big headline numbers */}
+              <div className="grid gap-3 md:grid-cols-3">
+                <Stat label="Total People" value={data.total_people} highlight />
                 <Stat label="% Cleaned" value={data.percent_cleaned} />
-                <Stat label="Open High Priority Tasks" value={data.open_high_priority_tasks} />
-                <Stat label="Weak Direct Line" value={data.weak_direct_line_count} />
-                <Stat label="Incomplete People" value={data.incomplete_people_count} />
-                <Stat label="Activity (7d)" value={data.activity_recent_7d_count} />
+                <Stat label="Conflicts" value={Object.entries(data.counts ?? {}).find(([k]) => /conflict/i.test(k))?.[1] ?? 0} accent="red" />
+              </div>
+              {/* Row 2: research health chips */}
+              <div className="flex flex-wrap gap-2">
+                <HealthChip label="Weak Direct Line" value={data.weak_direct_line_count} color="amber" />
+                <HealthChip label="Incomplete People" value={data.incomplete_people_count} color="rose" />
+                <HealthChip label="Activity (7d)" value={data.activity_recent_7d_count} color="sky" />
+                <HealthChip label="Open High Priority" value={data.open_high_priority_tasks} color="violet" />
               </div>
               <section className="rounded-xl border border-blue-100 bg-blue-50/40 p-4">
                 <h2 className="mb-2 text-lg font-semibold">Who to work on next</h2>
@@ -249,8 +251,28 @@ export default function DashboardPage() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
-  return <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><p className="text-xs text-slate-500">{label}</p><p className="text-2xl font-semibold text-indigo-950">{value}</p></div>;
+function Stat({ label, value, highlight, accent }: { label: string; value: number; highlight?: boolean; accent?: "red" }) {
+  return (
+    <div className={`rounded-xl border p-3 ${accent === "red" ? "border-red-100 bg-red-50/40" : highlight ? "border-indigo-200 bg-indigo-100/60" : "border-indigo-100 bg-indigo-50/50"}`}>
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className={`text-3xl font-semibold ${accent === "red" ? "text-red-700" : "text-indigo-950"}`}>{value}</p>
+    </div>
+  );
+}
+
+function HealthChip({ label, value, color }: { label: string; value: number; color: "amber" | "rose" | "sky" | "violet" }) {
+  const styles: Record<string, string> = {
+    amber: "border-amber-200 bg-amber-50 text-amber-900",
+    rose: "border-rose-200 bg-rose-50 text-rose-900",
+    sky: "border-sky-200 bg-sky-50 text-sky-900",
+    violet: "border-violet-200 bg-violet-50 text-violet-900",
+  };
+  return (
+    <div className={`rounded-lg border px-3 py-1.5 text-sm ${styles[color]}`}>
+      <span className="font-semibold">{value}</span>
+      <span className="ml-1 text-xs opacity-75">{label}</span>
+    </div>
+  );
 }
 
 function ActionHintPill({ label }: { label: string }) {

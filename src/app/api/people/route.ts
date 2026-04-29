@@ -107,6 +107,7 @@ export async function POST(request: Request) {
   if ("error" in auth) return auth.error;
   const { supabase, user } = auth;
   const body = await request.json();
+  const isStartingPerson = Boolean(body.is_starting_person);
 
   const { data: existing, error: existingError } = await supabase
     .from("people")
@@ -121,6 +122,14 @@ export async function POST(request: Request) {
   const personId = `P${String(max + 1).padStart(3, "0")}`;
   const now = new Date().toISOString();
 
+  if (isStartingPerson) {
+    await supabase
+      .from("people")
+      .update({ generation_number: null })
+      .eq("user_id", user.id)
+      .eq("generation_number", 0);
+  }
+
   const { data, error } = await supabase
     .from("people")
     .insert({
@@ -130,8 +139,8 @@ export async function POST(request: Request) {
       main_question: body.main_question ?? null,
       birth_date: body.birth_date ?? null,
       death_date: body.death_date ?? null,
-      generation_number: body.generation_number ?? null,
-      is_direct_line: !!body.is_direct_line,
+      generation_number: isStartingPerson ? 0 : (body.generation_number ?? null),
+      is_direct_line: isStartingPerson ? true : !!body.is_direct_line,
       is_fast_track: !!body.is_fast_track,
       status: "Needs Proof",
       current_step: 1,
